@@ -1,3 +1,6 @@
+// Read/write helpers for our JSON-file "database" - every route reads a file into
+// memory, does normal array logic (.find/.filter/.push), then writes it back.
+
 import { promises as fs } from "fs";
 import path from "path";
 

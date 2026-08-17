@@ -1,3 +1,6 @@
+// Middleware that guards protected routes: verifies the JWT sent in the
+// Authorization header, and attaches the logged-in user's id to req.userId.
+
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 
