@@ -2,7 +2,7 @@
 // the timer/history/stats views once a token exists. Token is kept in both
 // React state (drives the UI) and localStorage (survives a page refresh).
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   register,
   login,
@@ -22,6 +22,20 @@ function App() {
   const [error, setError] = useState("");
   const [isRegistering, setIsRegistering] = useState(false);
 
+  const DURATION = 25 * 60; // 25 minutes, in seconds
+
+  const [secondsLeft, setSecondsLeft] = useState(DURATION);
+  const [isRunning, setIsRunning] = useState(false);
+  const startTimeRef = useRef<number | null>(null);
+  const accumulatedRef = useRef(0);
+
+  const [view, setView] = useState<"timer" | "history" | "stats">("timer");
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [stats, setStats] = useState<{
+    totalSecondsThisWeek: number;
+    currentStreak: number;
+  } | null>(null);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
@@ -36,6 +50,67 @@ function App() {
     } catch (err: any) {
       setError(err.message);
     }
+  }
+
+  useEffect(() => {
+    if (!isRunning) return;
+
+    startTimeRef.current = performance.now();
+
+    const intervalId = setInterval(() => {
+      const elapsedSinceStart =
+        (performance.now() - startTimeRef.current!) / 1000;
+      const totalElapsed = accumulatedRef.current + elapsedSinceStart;
+      const remaining = Math.max(0, DURATION - totalElapsed);
+
+      setSecondsLeft(Math.ceil(remaining));
+
+      if (remaining <= 0) {
+        finishSession(true, DURATION);
+      }
+    }, 250);
+
+    return () => clearInterval(intervalId);
+  }, [isRunning]);
+
+  const [quote, setQuote] = useState<{
+    content: string;
+    author: string;
+  } | null>(null);
+
+  function getElapsedSeconds() {
+    if (!isRunning || startTimeRef.current === null)
+      return accumulatedRef.current;
+    return (
+      accumulatedRef.current + (performance.now() - startTimeRef.current) / 1000
+    );
+  }
+
+  async function finishSession(completed: boolean, durationSeconds: number) {
+    setIsRunning(false);
+    accumulatedRef.current = 0;
+    setSecondsLeft(DURATION);
+
+    await createSession(token!, Math.round(durationSeconds), completed);
+
+    if (completed) {
+      const q = await getQuote();
+      setQuote(q);
+    }
+  }
+
+  function handleStartPause() {
+    if (isRunning) {
+      accumulatedRef.current +=
+        (performance.now() - startTimeRef.current!) / 1000;
+      setIsRunning(false);
+    } else {
+      setIsRunning(true);
+    }
+  }
+
+  function handleGiveUp() {
+    finishSession(false, getElapsedSeconds());
   }
 
   // Logged out - show the login/register form instead of the app
@@ -66,7 +141,80 @@ function App() {
     );
   }
 
-  return <div>Logged in! Token: {token}</div>;
+  async function loadHistory() {
+    const data = await getSessions(token!);
+    setSessions(data);
+    setView("history");
+  }
+
+  async function loadStats() {
+    const data = await getStats(token!);
+    setStats(data);
+    setView("stats");
+  }
+
+  const minutes = Math.floor(secondsLeft / 60);
+  const seconds = secondsLeft % 60;
+
+  return (
+    <div>
+      <nav>
+        <button onClick={() => setView("timer")}>Timer</button>
+        <button onClick={loadHistory}>History</button>
+        <button onClick={loadStats}>Stats</button>
+        <button
+          onClick={() => {
+            localStorage.removeItem("token");
+            setToken(null);
+          }}
+        >
+          Log out
+        </button>
+      </nav>
+
+      {view === "timer" && (
+        <div>
+          <h1>
+            {minutes}:{seconds.toString().padStart(2, "0")}
+          </h1>
+
+          <button onClick={handleStartPause}>
+            {isRunning ? "Pause" : "Start"}
+          </button>
+          <button onClick={handleGiveUp}>Give Up</button>
+
+          {quote && (
+            <div>
+              <p>"{quote.content}"</p>
+              <p>- {quote.author}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {view === "history" && (
+        <ul>
+          {sessions.map((s) => (
+            <li key={s.id}>
+              {new Date(s.startedAt).toLocaleString()} —{" "}
+              {Math.round(s.durationSeconds / 60)} min —{" "}
+              {s.completed ? "Completed" : "Abandoned"}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {view === "stats" && stats && (
+        <div>
+          <p>
+            Total focus time this week:{" "}
+            {Math.round(stats.totalSecondsThisWeek / 60)} minutes
+          </p>
+          <p>Current streak: {stats.currentStreak} days</p>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default App;
